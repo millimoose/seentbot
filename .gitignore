@@ -1,9 +1,8 @@
 # Dependencies
 node_modules/
 
-# Environment
-.envrc.local
-.env.local
+# Environment (ESC manages all env vars)
+# Local overrides go in .envrc directly
 
 # Database
 *.db

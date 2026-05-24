@@ -1,0 +1,5 @@
+# Local environment overrides
+# This file is gitignored - use for local development only
+
+# Uncomment for local development:
+# DATABASE_URL="file:./dev.db"

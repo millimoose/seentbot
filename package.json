@@ -14,7 +14,8 @@
   },
   "dependencies": {
     "@prisma/client": "^6.0.0",
-    "discord.js": "^14.16.0"
+    "discord.js": "^14.16.0",
+    "jimp": "^1.6.0"
   },
   "devDependencies": {
     "@types/bun": "^1.0.0",

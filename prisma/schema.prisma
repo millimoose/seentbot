@@ -15,10 +15,13 @@ model Message {
   channelId  String
   guildId    String?
   authorId   String
-  url        String   // Normalized URL (max 2048 chars)
+  url        String?  // Normalized URL (max 2048 chars)
+  imageUrl   String?  // Direct image URL from embed/attachment
+  imageHash  String?  // Perceptual hash of image
   timestamp  DateTime
   messageUrl String   // Full jump link to message
 
   @@index([url])
   @@index([channelId])
+  @@index([imageHash])
 }

@@ -19,6 +19,23 @@ export interface DuplicateResult {
 }
 
 /**
+ * A detected image from Discord embeds or attachments.
+ */
+export interface DetectedImage {
+  url: string;
+  hash: string | null;
+}
+
+/**
+ * Result of checking an image for duplicates.
+ */
+export interface ImageDuplicateResult {
+  isDuplicate: boolean;
+  originalMessage?: Message;
+  similarity?: number;
+}
+
+/**
  * Represents a stored message record in the database.
  */
 export interface Message {
@@ -26,7 +43,9 @@ export interface Message {
   channelId: string;
   guildId: string | null;
   authorId: string;
-  url: string;
+  url: string | null;
+  imageUrl: string | null;
+  imageHash: string | null;
   timestamp: Date;
   messageUrl: string;
 }
@@ -39,21 +58,34 @@ export interface MessageData {
   channelId: string;
   guildId: string | null;
   authorId: string;
-  url: string;
+  url?: string | null;
+  imageUrl?: string | null;
+  imageHash?: string | null;
   timestamp: Date;
   messageUrl: string;
 }
 
 /**
- * Discord embed structure for URL extraction.
+ * Discord embed structure for URL and image extraction.
  */
 export interface EmbedData {
   type: string;
   url?: string;
   title?: string;
+  thumbnail?: {
+    url?: string;
+  };
+  image?: {
+    url?: string;
+  };
 }
 
 /**
  * Helper type for extracting embeds from a Discord message.
  */
 export type ExtractableEmbeds = Pick<DiscordMessage, "embeds">["embeds"];
+
+/**
+ * Helper type for extracting attachments from a Discord message.
+ */
+export type ExtractableAttachments = Pick<DiscordMessage, "attachments">["attachments"];

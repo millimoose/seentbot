@@ -4,7 +4,7 @@ import type { MessageData } from "../types.js";
 const prisma = new PrismaClient();
 
 /**
- * Saves a new message URL to the database.
+ * Saves a new message to the database with optional URL and image.
  * @param message - The message data to store
  */
 export async function saveMessage(message: MessageData): Promise<Message> {
@@ -14,7 +14,9 @@ export async function saveMessage(message: MessageData): Promise<Message> {
       channelId: message.channelId,
       guildId: message.guildId,
       authorId: message.authorId,
-      url: message.url,
+      url: message.url ?? null,
+      imageUrl: message.imageUrl ?? null,
+      imageHash: message.imageHash ?? null,
       timestamp: message.timestamp,
       messageUrl: message.messageUrl,
     },
@@ -44,6 +46,31 @@ export async function findByUrl(
 }
 
 /**
+ * Finds messages with similar image hashes for duplicate detection.
+ * Returns candidates that might match (first 100 by timestamp).
+ * @param hash - The image hash to search for
+ * @param channelId - Optional channel ID to filter by
+ * @returns Array of messages with image hashes
+ */
+export async function findByImageHash(
+  hash: string,
+  channelId?: string
+): Promise<Message[]> {
+  return prisma.message.findMany({
+    where: {
+      imageHash: {
+        not: null,
+      },
+      ...(channelId && { channelId }),
+    },
+    orderBy: {
+      timestamp: "desc",
+    },
+    take: 100,
+  });
+}
+
+/**
  * Initializes the database connection.
  * Call this at application startup.
  */
@@ -60,3 +87,4 @@ export async function closeDatabase(): Promise<void> {
 }
 
 export { prisma };
+export type { Message };

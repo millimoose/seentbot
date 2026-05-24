@@ -1,5 +1,13 @@
 import { Client, IntentsBitField, type Message as DiscordMessage } from "discord.js";
-import { extractEmbedUrls, checkDuplicate, resolveUrl } from "./services/dedup.js";
+import {
+  extractEmbedUrls,
+  extractEmbedImages,
+  extractAttachmentImages,
+  checkDuplicate,
+  checkImageDuplicate,
+  resolveUrl,
+  processImage,
+} from "./services/dedup.js";
 import { saveMessage, initDatabase, closeDatabase } from "./services/storage.js";
 import { logger } from "./services/logger.js";
 
@@ -18,8 +26,59 @@ function getMessageUrl(message: DiscordMessage): string {
 }
 
 /**
+ * Handles a duplicate URL by replying in a thread.
+ */
+async function handleDuplicateUrl(
+  message: DiscordMessage,
+  url: string,
+  originalMessageUrl: string
+): Promise<void> {
+  logger.info(`Duplicate URL detected: ${url} (original: ${originalMessageUrl})`);
+
+  const threadName = `Duplicate: ${url.substring(0, 50)}`;
+  const replyText = `I've already seen this link! Original: ${originalMessageUrl}`;
+
+  if (message.hasThread) {
+    await message.thread?.send(replyText);
+  } else {
+    const thread = await message.startThread({
+      name: threadName,
+      autoArchiveDuration: 60,
+    });
+    await thread.send(replyText);
+  }
+}
+
+/**
+ * Handles a duplicate image by replying in a thread.
+ */
+async function handleDuplicateImage(
+  message: DiscordMessage,
+  imageUrl: string,
+  originalMessageUrl: string,
+  similarity: number
+): Promise<void> {
+  logger.info(
+    `Duplicate image detected: ${imageUrl} ~ ${similarity.toFixed(1)}% (original: ${originalMessageUrl})`
+  );
+
+  const threadName = `Duplicate Image`;
+  const replyText = `I've already seen this image! (${similarity.toFixed(1)}% similar) Original: ${originalMessageUrl}`;
+
+  if (message.hasThread) {
+    await message.thread?.send(replyText);
+  } else {
+    const thread = await message.startThread({
+      name: threadName,
+      autoArchiveDuration: 60,
+    });
+    await thread.send(replyText);
+  }
+}
+
+/**
  * Handles a new message event.
- * Extracts URLs from content and embeds, resolves redirects,
+ * Extracts URLs and images from embeds and attachments,
  * checks for duplicates, and either stores the message or
  * replies in a thread with the original link.
  */
@@ -27,64 +86,90 @@ async function handleMessage(message: DiscordMessage): Promise<void> {
   // Ignore bot messages
   if (message.author.bot) return;
 
-  // Ignore messages without embeds
-  if (!message.embeds || message.embeds.length === 0) {
+  // Ignore messages without embeds or attachments
+  const hasEmbeds = message.embeds && message.embeds.length > 0;
+  const hasAttachments = message.attachments && message.attachments.size > 0;
+
+  if (!hasEmbeds && !hasAttachments) {
     return;
   }
 
-  // Extract URLs from embeds
-  const embedUrls = extractEmbedUrls(message.embeds);
+  // Extract and process URLs from embeds
+  if (hasEmbeds) {
+    const embedUrls = extractEmbedUrls(message.embeds);
 
-  // Log what we found
-  for (const { original } of embedUrls) {
-    logger.debug(`URL found in embed: ${original}`);
+    for (const detected of embedUrls) {
+      // Resolve URL across redirects
+      const resolved = await resolveUrl(detected.url);
+
+      // Log resolution
+      if (resolved !== detected.url) {
+        logger.debug(`URL resolved: ${detected.url} -> ${resolved}`);
+      }
+
+      // Check for duplicates
+      const result = await checkDuplicate(resolved);
+
+      if (result.isDuplicate && result.originalMessage) {
+        await handleDuplicateUrl(message, resolved, result.originalMessage.messageUrl);
+      } else {
+        // First time seeing this URL - store it
+        await saveMessage({
+          id: message.id,
+          channelId: message.channelId,
+          guildId: message.guildId ?? null,
+          authorId: message.author.id,
+          url: resolved,
+          timestamp: message.createdAt,
+          messageUrl: getMessageUrl(message),
+        });
+      }
+    }
   }
 
-  if (embedUrls.length === 0) return;
+  // Extract and process images from embeds and attachments
+  if (hasEmbeds || hasAttachments) {
+    const imageUrls: string[] = [];
 
-  // Process each URL
-  for (const detected of embedUrls) {
-    // Resolve URL across redirects
-    const resolved = await resolveUrl(detected.url);
-
-    // Log resolution
-    if (resolved !== detected.url) {
-      logger.debug(`URL resolved: ${detected.url} -> ${resolved}`);
+    if (hasEmbeds) {
+      imageUrls.push(...extractEmbedImages(message.embeds));
     }
 
-    // Check for duplicates
-    const result = await checkDuplicate(resolved);
+    if (hasAttachments) {
+      imageUrls.push(...extractAttachmentImages(message.attachments));
+    }
 
-    if (result.isDuplicate && result.originalMessage) {
-      // Found a duplicate - reply in a thread
-      logger.info(`Duplicate URL detected: ${resolved} (original: ${result.originalMessage.messageUrl})`);
+    // Process each image
+    for (const imageUrl of imageUrls) {
+      const detected = await processImage(imageUrl);
 
-      // Check if message already has a thread
-      if (message.hasThread) {
-        await message.thread?.send(
-          `I've already seen this link! Original: ${result.originalMessage.messageUrl}`
+      if (!detected || !detected.hash) {
+        continue;
+      }
+
+      // Check for duplicates
+      const result = await checkImageDuplicate(detected.hash);
+
+      if (result.isDuplicate && result.originalMessage) {
+        await handleDuplicateImage(
+          message,
+          imageUrl,
+          result.originalMessage.messageUrl,
+          result.similarity ?? 0
         );
       } else {
-        const threadName = `Duplicate: ${detected.original.substring(0, 50)}`;
-        const thread = await message.startThread({
-          name: threadName,
-          autoArchiveDuration: 60,
+        // First time seeing this image - store it
+        await saveMessage({
+          id: message.id,
+          channelId: message.channelId,
+          guildId: message.guildId ?? null,
+          authorId: message.author.id,
+          imageUrl: detected.url,
+          imageHash: detected.hash,
+          timestamp: message.createdAt,
+          messageUrl: getMessageUrl(message),
         });
-        await thread.send(
-          `I've already seen this link! Original: ${result.originalMessage.messageUrl}`
-        );
       }
-    } else {
-      // First time seeing this URL - store it
-      await saveMessage({
-        id: message.id,
-        channelId: message.channelId,
-        guildId: message.guildId ?? null,
-        authorId: message.author.id,
-        url: resolved,
-        timestamp: message.createdAt,
-        messageUrl: getMessageUrl(message),
-      });
     }
   }
 }

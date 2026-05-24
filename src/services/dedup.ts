@@ -1,5 +1,7 @@
-import { findByUrl } from "./storage.js";
-import type { DetectedUrl, DuplicateResult, ExtractableEmbeds } from "../types.js";
+import { findByUrl, findByImageHash } from "./storage.js";
+import type { DetectedUrl, DuplicateResult, ExtractableEmbeds, ExtractableAttachments, DetectedImage, ImageDuplicateResult } from "../types.js";
+import { downloadImage, computeImageHash, hashSimilarity } from "./image-hash.js";
+import { logger } from "./logger.js";
 
 /**
  * Resolve a URL following redirects to get the final destination.
@@ -91,6 +93,114 @@ export function extractEmbedUrls(embeds: ExtractableEmbeds): DetectedUrl[] {
   }
 
   return urls;
+}
+
+/**
+ * Extracts image URLs from Discord message embeds.
+ * Looks at thumbnail.url and image.url fields.
+ * @param embeds - Array of embeds from a Discord message
+ * @returns Array of detected image URLs
+ */
+export function extractEmbedImages(embeds: ExtractableEmbeds): string[] {
+  if (!embeds || embeds.length === 0) return [];
+
+  const imageUrls: string[] = [];
+
+  for (const embed of embeds) {
+    // Check thumbnail
+    if (embed.thumbnail?.url) {
+      imageUrls.push(embed.thumbnail.url);
+      logger.debug(`Found image in embed thumbnail: ${embed.thumbnail.url}`);
+    }
+    // Check main image
+    if (embed.image?.url) {
+      imageUrls.push(embed.image.url);
+      logger.debug(`Found image in embed: ${embed.image.url}`);
+    }
+  }
+
+  return imageUrls;
+}
+
+/**
+ * Extracts image URLs from Discord message attachments.
+ * Filters for common image MIME types.
+ * @param attachments - Array of attachments from a Discord message
+ * @returns Array of detected image URLs
+ */
+export function extractAttachmentImages(attachments: ExtractableAttachments): string[] {
+  if (!attachments || attachments.size === 0) return [];
+
+  const imageUrls: string[] = [];
+  const imageTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+
+  for (const attachment of attachments.values()) {
+    if (imageTypes.includes(attachment.contentType ?? "")) {
+      imageUrls.push(attachment.url);
+      logger.debug(`Found image in attachment: ${attachment.url}`);
+    }
+  }
+
+  return imageUrls;
+}
+
+/**
+ * Process an image URL: download, compute hash.
+ * @param imageUrl - URL of the image
+ * @returns DetectedImage with URL and hash, or null if failed
+ */
+export async function processImage(imageUrl: string): Promise<DetectedImage | null> {
+  const buffer = await downloadImage(imageUrl);
+  if (!buffer) return null;
+
+  const hash = await computeImageHash(buffer);
+  if (!hash) return null;
+
+  return {
+    url: imageUrl,
+    hash,
+  };
+}
+
+/**
+ * Checks if an image has been posted before using perceptual hash.
+ * @param hash - The image hash to check
+ * @param threshold - Minimum similarity percentage (default 85%)
+ * @param channelId - Optional channel ID to limit search scope
+ * @returns ImageDuplicateResult indicating if a duplicate was found
+ */
+export async function checkImageDuplicate(
+  hash: string,
+  threshold = 85,
+  channelId?: string
+): Promise<ImageDuplicateResult> {
+  const candidates = await findByImageHash(hash, channelId);
+
+  for (const candidate of candidates) {
+    if (!candidate.imageHash) continue;
+
+    const similarity = hashSimilarity(hash, candidate.imageHash);
+
+    if (similarity >= threshold) {
+      return {
+        isDuplicate: true,
+        originalMessage: {
+          id: candidate.id,
+          channelId: candidate.channelId,
+          guildId: candidate.guildId,
+          authorId: candidate.authorId,
+          url: candidate.url,
+          imageUrl: candidate.imageUrl,
+          imageHash: candidate.imageHash,
+          timestamp: candidate.timestamp,
+          messageUrl: candidate.messageUrl,
+        },
+        similarity,
+      };
+    }
+  }
+
+  return { isDuplicate: false };
 }
 
 /**

@@ -65,14 +65,22 @@ async function handleMessage(message: DiscordMessage): Promise<void> {
     if (result.isDuplicate && result.originalMessage) {
       // Found a duplicate - reply in a thread
       logger.info(`Duplicate URL detected: ${resolved} (original: ${result.originalMessage.messageUrl})`);
-      const threadName = `Duplicate: ${detected.original.substring(0, 50)}`;
-      const thread = await message.startThread({
-        name: threadName,
-        autoArchiveDuration: 60,
-      });
-      await thread.send(
-        `I've already seen this link! Original: ${result.originalMessage.messageUrl}`
-      );
+
+      // Check if message already has a thread
+      if (message.hasThread) {
+        await message.thread?.send(
+          `I've already seen this link! Original: ${result.originalMessage.messageUrl}`
+        );
+      } else {
+        const threadName = `Duplicate: ${detected.original.substring(0, 50)}`;
+        const thread = await message.startThread({
+          name: threadName,
+          autoArchiveDuration: 60,
+        });
+        await thread.send(
+          `I've already seen this link! Original: ${result.originalMessage.messageUrl}`
+        );
+      }
     } else {
       // First time seeing this URL - store it
       await saveMessage({

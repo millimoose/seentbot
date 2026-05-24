@@ -1,5 +1,5 @@
 import { Client, IntentsBitField, type Message as DiscordMessage } from "discord.js";
-import { extractUrls, extractEmbedUrls, checkDuplicate, resolveUrl } from "./services/dedup.js";
+import { extractEmbedUrls, checkDuplicate, resolveUrl } from "./services/dedup.js";
 import { saveMessage, initDatabase, closeDatabase } from "./services/storage.js";
 import { logger } from "./services/logger.js";
 
@@ -7,7 +7,6 @@ const client = new Client({
   intents: [
     IntentsBitField.Flags.Guilds,
     IntentsBitField.Flags.GuildMessages,
-    IntentsBitField.Flags.MessageContent,
   ],
 });
 
@@ -28,29 +27,23 @@ async function handleMessage(message: DiscordMessage): Promise<void> {
   // Ignore bot messages
   if (message.author.bot) return;
 
-  // Ignore messages without content
-  if (!message.content && (!message.embeds || message.embeds.length === 0)) {
+  // Ignore messages without embeds
+  if (!message.embeds || message.embeds.length === 0) {
     return;
   }
 
-  // Extract URLs from content and embeds
-  const contentUrls = extractUrls(message.content);
+  // Extract URLs from embeds
   const embedUrls = extractEmbedUrls(message.embeds);
 
   // Log what we found
   for (const { original } of embedUrls) {
     logger.debug(`URL found in embed: ${original}`);
   }
-  for (const { original } of contentUrls) {
-    logger.debug(`URL found in content: ${original}`);
-  }
 
-  const allUrls = [...contentUrls, ...embedUrls];
-
-  if (allUrls.length === 0) return;
+  if (embedUrls.length === 0) return;
 
   // Process each URL
-  for (const detected of allUrls) {
+  for (const detected of embedUrls) {
     // Resolve URL across redirects
     const resolved = await resolveUrl(detected.url);
 

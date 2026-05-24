@@ -1,0 +1,9 @@
+# Seentbot Environment Variables
+# Copy this file to .envrc and fill in values for local development
+# Or configure in Pulumi ESC: millimoose/seentbot/dev
+
+# Discord
+DISCORD_BOT_TOKEN=    # Bot token from Discord Developer Portal
+
+# Database
+DATABASE_URL=file:./dev.db  # SQLite for local dev

@@ -1,0 +1,25 @@
+node_modules:
+  commands:
+    - bun
+
+pre-commit:
+  parallelize: true
+  commands:
+    - name: typecheck
+      run: proto run moon run seentbot:typecheck
+      stage: pre-commit
+    - name: lint
+      run: proto run moon run seentbot:lint
+      stage: pre-commit
+
+pre-push:
+  commands:
+    - name: test
+      run: proto run moon run seentbot:test
+      stage: pre-push
+
+retry:
+  limit: 1
+
+plugins:
+  colors: always

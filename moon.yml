@@ -1,0 +1,36 @@
+language: typescript
+
+projects:
+  seentbot:
+    type: application
+    name: seentbot
+    ci:
+      jobs:
+        - typecheck
+        - lint
+
+tasks:
+  typecheck:
+    command: bun tsc --noEmit
+    inputs:
+      - src/**/*
+      - tsconfig.json
+
+  lint:
+    command: bun oxlint
+    inputs:
+      - src/**/*
+
+  test:
+    command: bun test
+    inputs:
+      - tests/**/*
+      - src/**/*
+
+  dev:
+    command: bun src/bot.ts
+    platform: system
+
+  studio:
+    command: bunx prisma studio
+    platform: system

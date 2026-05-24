@@ -7,22 +7,19 @@
     "dev": "bun src/bot.ts",
     "build": "bun tsc",
     "typecheck": "bun tsc --noEmit",
-    "lint": "bun oxlint",
+    "lint": "bun biome check ./src",
     "test": "bun test",
     "prisma:generate": "bunx prisma generate",
     "prisma:studio": "bunx prisma studio"
   },
   "dependencies": {
-    "@prisma/client": "^6.0.0",
-    "discord.js": "^14.16.0",
-    "jimp": "^1.6.0"
+    "@prisma/client": "^7.8.0",
+    "discord.js": "^14.26.4",
+    "jimp": "^1.6.1"
   },
   "devDependencies": {
-    "@types/bun": "^1.0.0",
-    "@types/node": "^22.0.0",
-    "lefthook": "^1.8.0",
-    "oxlint": "^0.14.0",
-    "prisma": "^6.0.0",
-    "typescript": "^5.5.0"
+    "@biomejs/biome": "^1.9.4",
+    "prisma": "^7.8.0",
+    "typescript": "^6.0.0"
   }
 }

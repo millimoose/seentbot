@@ -69,7 +69,7 @@ async function handleMessage(message: DiscordMessage): Promise<void> {
 // Event handlers
 client.on("messageCreate", handleMessage);
 
-client.on("ready", async () => {
+client.on("clientReady", async () => {
   console.log(`Logged in as ${client.user?.tag}`);
 
   // Initialize database connection

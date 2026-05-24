@@ -1,7 +1,7 @@
 import { Client, IntentsBitField, type Message as DiscordMessage } from "discord.js";
-import { extractUrls, extractEmbedUrls, checkDuplicate } from "./services/dedup.js";
+import { extractUrls, extractEmbedUrls, checkDuplicate, resolveUrl } from "./services/dedup.js";
 import { saveMessage, initDatabase, closeDatabase } from "./services/storage.js";
-import { normalizeUrl } from "./services/dedup.js";
+import { logger } from "./services/logger.js";
 
 const client = new Client({
   intents: [
@@ -20,8 +20,9 @@ function getMessageUrl(message: DiscordMessage): string {
 
 /**
  * Handles a new message event.
- * Extracts URLs from content and embeds, checks for duplicates,
- * and either stores the message or replies with the original link.
+ * Extracts URLs from content and embeds, resolves redirects,
+ * checks for duplicates, and either stores the message or
+ * replies in a thread with the original link.
  */
 async function handleMessage(message: DiscordMessage): Promise<void> {
   // Ignore bot messages
@@ -35,21 +36,42 @@ async function handleMessage(message: DiscordMessage): Promise<void> {
   // Extract URLs from content and embeds
   const contentUrls = extractUrls(message.content);
   const embedUrls = extractEmbedUrls(message.embeds);
+
+  // Log what we found
+  for (const { original } of embedUrls) {
+    logger.debug(`URL found in embed: ${original}`);
+  }
+  for (const { original } of contentUrls) {
+    logger.debug(`URL found in content: ${original}`);
+  }
+
   const allUrls = [...contentUrls, ...embedUrls];
 
   if (allUrls.length === 0) return;
 
   // Process each URL
   for (const detected of allUrls) {
-    const normalized = detected.url;
+    // Resolve URL across redirects
+    const resolved = await resolveUrl(detected.url);
+
+    // Log resolution
+    if (resolved !== detected.url) {
+      logger.debug(`URL resolved: ${detected.url} -> ${resolved}`);
+    }
 
     // Check for duplicates
-    const result = await checkDuplicate(normalized);
+    const result = await checkDuplicate(resolved);
 
     if (result.isDuplicate && result.originalMessage) {
-      // Found a duplicate - reply with the original message link
-      await message.reply(
-        `I've already seen this link! Check it out here: ${result.originalMessage.messageUrl}`
+      // Found a duplicate - reply in a thread
+      logger.info(`Duplicate URL detected: ${resolved} (original: ${result.originalMessage.messageUrl})`);
+      const threadName = `Duplicate: ${detected.original.substring(0, 50)}`;
+      const thread = await message.startThread({
+        name: threadName,
+        autoArchiveDuration: 60,
+      });
+      await thread.send(
+        `I've already seen this link! Original: ${result.originalMessage.messageUrl}`
       );
     } else {
       // First time seeing this URL - store it
@@ -58,7 +80,7 @@ async function handleMessage(message: DiscordMessage): Promise<void> {
         channelId: message.channelId,
         guildId: message.guildId ?? null,
         authorId: message.author.id,
-        url: normalized,
+        url: resolved,
         timestamp: message.createdAt,
         messageUrl: getMessageUrl(message),
       });

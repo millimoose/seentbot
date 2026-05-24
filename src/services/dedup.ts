@@ -2,6 +2,26 @@ import { findByUrl } from "./storage.js";
 import type { DetectedUrl, DuplicateResult, ExtractableEmbeds } from "../types.js";
 
 /**
+ * Resolve a URL following redirects to get the final destination.
+ * Uses HEAD request with redirects followed automatically.
+ */
+export async function resolveUrl(url: string): Promise<string> {
+  try {
+    const response = await fetch(url, {
+      method: "HEAD",
+      redirect: "follow",
+      headers: {
+        "User-Agent": "Seentbot/1.0 (Discord bot)",
+      },
+      signal: AbortSignal.timeout(5000),
+    });
+    return response.url;
+  } catch {
+    return url;
+  }
+}
+
+/**
  * Regular expression to match URLs in text content.
  * Matches http/https URLs with optional www prefix.
  */

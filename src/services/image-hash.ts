@@ -55,7 +55,7 @@ export async function computeImageHash(imageBuffer: Buffer): Promise<string | nu
 
     // Extract grayscale values (every 4th byte in RGBA)
     for (let i = 0; i < pixels.length; i += 4) {
-      const value = pixels[i]; // R value (after grayscale, all channels equal)
+      const value = pixels[i] as number; // R value (after grayscale, all channels equal)
       pixelValues.push(value);
       sum += value;
     }

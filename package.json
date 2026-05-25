@@ -7,7 +7,7 @@
     "dev": "bun src/bot.ts",
     "build": "bun tsc",
     "typecheck": "bun tsc --noEmit",
-    "lint": "bun biome check ./src",
+    "lint": "bunx oxlint ./src",
     "test": "bun test",
     "prisma:generate": "bunx prisma generate",
     "prisma:studio": "bunx prisma studio"
@@ -19,6 +19,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
+    "@tsconfig/bun": "^1.0.0",
     "prisma": "^7.8.0",
     "typescript": "^6.0.0"
   }

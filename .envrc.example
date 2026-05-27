@@ -7,3 +7,8 @@ DISCORD_BOT_TOKEN=    # Bot token from Discord Developer Portal
 
 # Database
 DATABASE_URL=file:./dev.db  # SQLite for local dev
+
+# Guild filter (optional)
+# GUILD_ID=*              # Respond to all guilds
+# GUILD_ID=123456789      # Respond to specific guild only
+# (empty or unset)        # Ignore all messages (safety default)

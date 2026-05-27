@@ -1,4 +1,4 @@
-import { Client, IntentsBitField, type Message as DiscordMessage } from "discord.js";
+import { Client, IntentsBitField, MessageFlags, type Message as DiscordMessage } from "discord.js";
 import {
   extractEmbedUrls,
   extractEmbedImages,
@@ -9,12 +9,36 @@ import {
   processImage,
 } from "./services/dedup.js";
 import { saveMessage, initDatabase, closeDatabase } from "./services/storage.js";
-import { logger } from "./services/logger.js";
+import { configureSync, getConsoleSink, getLogger, getJsonLinesFormatter } from "@logtape/logtape";
+import { getPrettyFormatter } from "@logtape/pretty";
+
+const isProduction = process.env.NODE_ENV === "production";
+
+configureSync({
+  sinks: {
+    console: getConsoleSink({
+      formatter: isProduction ? getJsonLinesFormatter() : getPrettyFormatter({ properties: true }),
+    }),
+  },
+  filters: {
+    minLevel: isProduction ? "info" : "debug",
+  },
+  loggers: [
+    {
+      category: ["seentbot"],
+      lowestLevel: isProduction ? "info" : "debug",
+      sinks: ["console"],
+    },
+  ],
+});
+
+const logger = getLogger("seentbot");
 
 const client = new Client({
   intents: [
     IntentsBitField.Flags.Guilds,
     IntentsBitField.Flags.GuildMessages,
+    IntentsBitField.Flags.MessageContent,
   ],
 });
 
@@ -26,31 +50,20 @@ function getMessageUrl(message: DiscordMessage): string {
 }
 
 /**
- * Handles a duplicate URL by replying in a thread.
+ * Handles a duplicate URL by replying to the message.
  */
 async function handleDuplicateUrl(
   message: DiscordMessage,
   url: string,
   originalMessageUrl: string
 ): Promise<void> {
-  logger.info(`Duplicate URL detected: ${url} (original: ${originalMessageUrl})`);
-
-  const threadName = `Duplicate: ${url.substring(0, 50)}`;
+  logger.info("Duplicate URL detected", { url, originalMessageUrl });
   const replyText = `I've already seen this link! Original: ${originalMessageUrl}`;
-
-  if (message.hasThread) {
-    await message.thread?.send(replyText);
-  } else {
-    const thread = await message.startThread({
-      name: threadName,
-      autoArchiveDuration: 60,
-    });
-    await thread.send(replyText);
-  }
+  await message.reply(replyText);
 }
 
 /**
- * Handles a duplicate image by replying in a thread.
+ * Handles a duplicate image by replying to the message.
  */
 async function handleDuplicateImage(
   message: DiscordMessage,
@@ -58,22 +71,13 @@ async function handleDuplicateImage(
   originalMessageUrl: string,
   similarity: number
 ): Promise<void> {
-  logger.info(
-    `Duplicate image detected: ${imageUrl} ~ ${similarity.toFixed(1)}% (original: ${originalMessageUrl})`
-  );
-
-  const threadName = `Duplicate Image`;
+  logger.info("Duplicate image detected", {
+    imageUrl,
+    similarity: similarity.toFixed(1) + "%",
+    originalMessageUrl,
+  });
   const replyText = `I've already seen this image! (${similarity.toFixed(1)}% similar) Original: ${originalMessageUrl}`;
-
-  if (message.hasThread) {
-    await message.thread?.send(replyText);
-  } else {
-    const thread = await message.startThread({
-      name: threadName,
-      autoArchiveDuration: 60,
-    });
-    await thread.send(replyText);
-  }
+  await message.reply(replyText);
 }
 
 /**
@@ -83,9 +87,65 @@ async function handleDuplicateImage(
  * replies in a thread with the original link.
  */
 async function handleMessage(message: DiscordMessage): Promise<void> {
-  // Ignore bot messages
-  if (message.author.bot) return;
+  const MESSAGE_FLAG_FORWARDED = MessageFlags.HasSnapshot;
 
+  // Guild filter: respond to all guilds (*), specific guild, or empty for no messages
+  const guildIdFilter = process.env.GUILD_ID;
+  if (guildIdFilter && guildIdFilter !== "*" && message.guildId !== guildIdFilter) {
+    return;
+  }
+
+  logger.debug("Saw message", {
+    id: message.id,
+    type: message.type,
+    embeds: message.embeds?.length ?? 0,
+    attachments: message.attachments?.size ?? 0,
+    flags: message.flags,
+  });
+
+  // Handle forwarded messages - extract original ID and use its embeds
+  if (message.flags.has(MESSAGE_FLAG_FORWARDED)) {
+    const rawMessage = message as unknown as Record<string, unknown>;
+    const snapshots = rawMessage.messageSnapshots as { first: () => unknown } | undefined;
+    
+    const original = snapshots?.first() as DiscordMessage | undefined;
+    
+    if (original) {
+      logger.info("Got forwarded original", {
+        originalId: original.id,
+        originalEmbeds: original.embeds.length,
+      });
+      // Extract embeds from original message
+      const embedUrls = extractEmbedUrls(original.embeds);
+      for (const detected of embedUrls) {
+        const resolved = await resolveUrl(detected.url);
+        const result = await checkDuplicate(resolved);
+        if (result.isDuplicate && result.originalMessage) {
+          await handleDuplicateUrl(message, resolved, result.originalMessage.messageUrl);
+        }
+      }
+      // Extract images from original
+      const embedImages = extractEmbedImages(original.embeds);
+      for (const url of embedImages) {
+        const detected = await processImage(url);
+        if (detected?.hash) {
+          const result = await checkImageDuplicate(detected.hash, message.guildId);
+          if (result.isDuplicate && result.originalMessage) {
+            await handleDuplicateImage(message, url, result.originalMessage.messageUrl, result.similarity ?? 0);
+          }
+        }
+      }
+    } else {
+      logger.info("No original in snapshots");
+    }
+    return;
+  }
+
+  // Process the message
+  await processMessage(message);
+}
+
+async function processMessage(message: DiscordMessage): Promise<void> {
   // Ignore messages without embeds or attachments
   const hasEmbeds = message.embeds && message.embeds.length > 0;
   const hasAttachments = message.attachments && message.attachments.size > 0;
@@ -98,13 +158,17 @@ async function handleMessage(message: DiscordMessage): Promise<void> {
   if (hasEmbeds) {
     const embedUrls = extractEmbedUrls(message.embeds);
 
+    if (embedUrls.length === 0) {
+      logger.debug("Has embeds but no URLs extracted");
+    }
+
     for (const detected of embedUrls) {
       // Resolve URL across redirects
       const resolved = await resolveUrl(detected.url);
 
       // Log resolution
       if (resolved !== detected.url) {
-        logger.debug(`URL resolved: ${detected.url} -> ${resolved}`);
+        logger.debug("URL resolved", { from: detected.url, to: resolved });
       }
 
       // Check for duplicates
@@ -112,7 +176,7 @@ async function handleMessage(message: DiscordMessage): Promise<void> {
 
       if (result.isDuplicate && result.originalMessage) {
         await handleDuplicateUrl(message, resolved, result.originalMessage.messageUrl);
-      } else {
+      } else if (message.author) {
         // First time seeing this URL - store it
         await saveMessage({
           id: message.id,
@@ -129,26 +193,64 @@ async function handleMessage(message: DiscordMessage): Promise<void> {
 
   // Extract and process images from embeds and attachments
   if (hasEmbeds || hasAttachments) {
-    const imageUrls: string[] = [];
+    // Debug log all embeds
+    for (const embed of message.embeds ?? []) {
+      logger.debug("Embed", {
+        type: (embed as unknown as { type?: string }).type,
+        url: embed.url,
+        image: embed.image?.url,
+        thumbnail: embed.thumbnail?.url,
+        video: embed.video?.url,
+      });
+    }
+
+    // Debug log all attachments
+    for (const attachment of message.attachments.values()) {
+      logger.debug("Attachment", {
+        name: attachment.name,
+        contentType: attachment.contentType,
+        size: attachment.size,
+      });
+    }
+
+    const imageUrls: { url: string; source: string }[] = [];
 
     if (hasEmbeds) {
-      imageUrls.push(...extractEmbedImages(message.embeds));
+      const embedImages = extractEmbedImages(message.embeds);
+      logger.debug("Extracted embed images", { count: embedImages.length, urls: embedImages });
+      for (const url of embedImages) {
+        imageUrls.push({ url, source: "embed" });
+      }
     }
 
     if (hasAttachments) {
-      imageUrls.push(...extractAttachmentImages(message.attachments));
+      const attachmentImages = extractAttachmentImages(message.attachments);
+      logger.debug("Extracted attachment images", { count: attachmentImages.length, urls: attachmentImages });
+      for (const url of attachmentImages) {
+        imageUrls.push({ url, source: "attachment" });
+      }
     }
 
     // Process each image
-    for (const imageUrl of imageUrls) {
+    if (imageUrls.length > 0) {
+      logger.debug("Processing images", {
+        count: imageUrls.length,
+        sources: imageUrls.map((i) => i.source),
+      });
+    }
+
+    for (const { url: imageUrl, source } of imageUrls) {
       const detected = await processImage(imageUrl);
 
       if (!detected || !detected.hash) {
         continue;
       }
 
+      // Log image hash for testing
+      logger.debug("Image hash computed", { source, hash: detected.hash });
+
       // Check for duplicates
-      const result = await checkImageDuplicate(detected.hash);
+      const result = await checkImageDuplicate(detected.hash, message.guildId);
 
       if (result.isDuplicate && result.originalMessage) {
         await handleDuplicateImage(
@@ -157,7 +259,7 @@ async function handleMessage(message: DiscordMessage): Promise<void> {
           result.originalMessage.messageUrl,
           result.similarity ?? 0
         );
-      } else {
+      } else if (message.author) {
         // First time seeing this image - store it
         await saveMessage({
           id: message.id,
@@ -178,30 +280,31 @@ async function handleMessage(message: DiscordMessage): Promise<void> {
 client.on("messageCreate", handleMessage);
 
 client.on("clientReady", async () => {
-  console.log(`Logged in as ${client.user?.tag}`);
+  const nodeEnv = process.env.NODE_ENV ?? "development";
+  logger.info("Seentbot started", { nodeEnv, user: client.user?.tag });
 
   // Initialize database connection
   await initDatabase();
-  console.log("Database connection established");
+  logger.info("Database connection established");
 });
 
 client.on("disconnect", async () => {
   await closeDatabase();
-  console.log("Database connection closed");
+  logger.info("Database connection closed");
 });
 
 // Graceful shutdown
 process.on("SIGINT", async () => {
-  console.log("Shutting down...");
+  logger.info("Shutting down");
   await closeDatabase();
-  client.destroy();
+  void client.destroy();
   process.exit(0);
 });
 
 process.on("SIGTERM", async () => {
-  console.log("Shutting down...");
+  logger.info("Shutting down");
   await closeDatabase();
-  client.destroy();
+  void client.destroy();
   process.exit(0);
 });
 
@@ -209,18 +312,18 @@ process.on("SIGTERM", async () => {
 const token = process.env.DISCORD_BOT_TOKEN;
 
 if (!token) {
-  console.error("DISCORD_BOT_TOKEN environment variable is required");
+  logger.error("DISCORD_BOT_TOKEN environment variable is required");
   process.exit(1);
 }
 
 client.login(token).catch((error) => {
-  console.error("Failed to login:", error);
+  logger.error("Failed to login", { error: String(error) });
   process.exit(1);
 });
 
 // Handle unhandled rejections
 process.on("unhandledRejection", (reason) => {
-  console.error("Unhandled rejection:", reason);
+  logger.error("Unhandled rejection", { reason: String(reason) });
 });
 
 export { client, handleMessage, getMessageUrl };

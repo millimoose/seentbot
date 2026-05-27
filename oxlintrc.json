@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/ops/oxlintrc/schema.json",
+  "plugins": {
+    "typescript": true,
+    "eslint": {
+      "rules": {
+        "no-unused-vars": "warn",
+        "consistent-function-scoping": "warn"
+      }
+    }
+  },
+  "rules": {
+    "suspicious": "warn",
+    "perf": "warn"
+  }
+}

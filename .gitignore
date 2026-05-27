@@ -30,3 +30,6 @@ coverage/
 
 # Prisma
 prisma/migrations/
+
+# Prisma generated client
+src/generated/

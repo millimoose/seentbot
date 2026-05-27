@@ -1,7 +1,9 @@
 import { findByUrl, findByImageHash } from "./storage.js";
 import type { DetectedUrl, DuplicateResult, ExtractableEmbeds, ExtractableAttachments, DetectedImage, ImageDuplicateResult } from "../types.js";
 import { downloadImage, computeImageHash, hashSimilarity } from "./image-hash.js";
-import { logger } from "./logger.js";
+import { getLogger } from "@logtape/logtape";
+
+const logger = getLogger("seentbot");
 
 /**
  * Resolve a URL following redirects to get the final destination.
@@ -17,6 +19,7 @@ export async function resolveUrl(url: string): Promise<string> {
       },
       signal: AbortSignal.timeout(5000),
     });
+
     return response.url;
   } catch {
     return url;
@@ -110,12 +113,12 @@ export function extractEmbedImages(embeds: ExtractableEmbeds): string[] {
     // Check thumbnail
     if (embed.thumbnail?.url) {
       imageUrls.push(embed.thumbnail.url);
-      logger.debug(`Found image in embed thumbnail: ${embed.thumbnail.url}`);
+      logger.debug("Found image in embed thumbnail", { url: embed.thumbnail.url });
     }
     // Check main image
     if (embed.image?.url) {
       imageUrls.push(embed.image.url);
-      logger.debug(`Found image in embed: ${embed.image.url}`);
+      logger.debug("Found image in embed", { url: embed.image.url });
     }
   }
 
@@ -137,7 +140,7 @@ export function extractAttachmentImages(attachments: ExtractableAttachments): st
   for (const attachment of attachments.values()) {
     if (imageTypes.includes(attachment.contentType ?? "")) {
       imageUrls.push(attachment.url);
-      logger.debug(`Found image in attachment: ${attachment.url}`);
+      logger.debug("Found image in attachment", { url: attachment.url });
     }
   }
 
@@ -165,39 +168,39 @@ export async function processImage(imageUrl: string): Promise<DetectedImage | nu
 /**
  * Checks if an image has been posted before using perceptual hash.
  * @param hash - The image hash to check
+ * @param guildId - Guild to search within
  * @param threshold - Minimum similarity percentage (default 85%)
- * @param channelId - Optional channel ID to limit search scope
  * @returns ImageDuplicateResult indicating if a duplicate was found
  */
 export async function checkImageDuplicate(
   hash: string,
-  threshold = 85,
-  channelId?: string
+  guildId: string | null,
+  threshold = 85
 ): Promise<ImageDuplicateResult> {
-  const candidates = await findByImageHash(hash, channelId);
+  const candidate = await findByImageHash(hash, guildId);
 
-  for (const candidate of candidates) {
-    if (!candidate.imageHash) continue;
+  if (!candidate || !candidate.imageHash) {
+    return { isDuplicate: false };
+  }
 
-    const similarity = hashSimilarity(hash, candidate.imageHash);
+  const similarity = hashSimilarity(hash, candidate.imageHash);
 
-    if (similarity >= threshold) {
-      return {
-        isDuplicate: true,
-        originalMessage: {
-          id: candidate.id,
-          channelId: candidate.channelId,
-          guildId: candidate.guildId,
-          authorId: candidate.authorId,
-          url: candidate.url,
-          imageUrl: candidate.imageUrl,
-          imageHash: candidate.imageHash,
-          timestamp: candidate.timestamp,
-          messageUrl: candidate.messageUrl,
-        },
-        similarity,
-      };
-    }
+  if (similarity >= threshold) {
+    return {
+      isDuplicate: true,
+      originalMessage: {
+        id: candidate.id,
+        channelId: candidate.channelId,
+        guildId: candidate.guildId,
+        authorId: candidate.authorId,
+        url: candidate.url,
+        imageUrl: candidate.imageUrl,
+        imageHash: candidate.imageHash,
+        timestamp: candidate.timestamp,
+        messageUrl: candidate.messageUrl,
+      },
+      similarity,
+    };
   }
 
   return { isDuplicate: false };

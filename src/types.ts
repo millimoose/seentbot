@@ -1,4 +1,4 @@
-import type { Message as DiscordMessage, Embed } from "discord.js";
+import type { Message as DiscordMessage } from "discord.js";
 
 /**
  * A URL detected in a Discord message, with both the original

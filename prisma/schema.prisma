@@ -2,11 +2,13 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client-js"
+  provider   = "prisma-client"
+  engineType = "client"
+  output     = "../src/generated"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgres"
 }
 
 model Message {
@@ -16,11 +18,26 @@ model Message {
   authorId   String
   url        String?  // Normalized URL (max 2048 chars)
   imageUrl   String?  // Direct image URL from embed/attachment
-  imageHash  String?  // Perceptual hash of image
-  timestamp  DateTime
+  imageHash  String?  // Perceptual hash of image (16 hex chars)
+  timestamp  DateTime @default(now()) @db.Timestamp
   messageUrl String   // Full jump link to message
 
+  // Redundant index entries for image hash lookup
+  imageIndex ImageHashIndex[]
   @@index([url])
   @@index([channelId])
-  @@index([imageHash])
+  @@index([guildId])
+}
+
+// Index for efficient image hash lookup
+model ImageHashIndex {
+  id           String   @id  // TypeID
+  hashPrefix   String   // Hash with one char replaced by '*' (15 chars), or exact hash for distance=0
+  hashPosition Int      // Which position was replaced (0-15), or -1 for exact match
+  distance     Int      @default(1)  // 0 = exact match, 1 = one-char-different
+  createdAt    DateTime @default(now()) @db.Timestamp
+  messageId    String
+  message      Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([hashPrefix])
 }

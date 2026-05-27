@@ -17,7 +17,7 @@ tasks:
       - tsconfig.json
 
   lint:
-    command: bun oxlint
+    command: bunx oxlint --type-aware ./src
     inputs:
       - src/**/*
 

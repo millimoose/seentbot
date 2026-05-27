@@ -5,17 +5,17 @@ node_modules:
 pre-commit:
   parallelize: true
   commands:
-    - name: typecheck
-      run: proto run moon run seentbot:typecheck
-      stage: pre-commit
     - name: lint
-      run: proto run moon run seentbot:lint
+      run: direnv exec . bun run lint --fix
+      stage: pre-commit
+    - name: typecheck
+      run: direnv exec . bun run typecheck
       stage: pre-commit
 
 pre-push:
   commands:
     - name: test
-      run: proto run moon run seentbot:test
+      run: direnv exec . bun run test
       stage: pre-push
 
 retry:

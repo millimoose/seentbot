@@ -8,8 +8,8 @@
   },
   "scripts": {
     "dev": "bun --watch src/bot.ts",
-    "start": "bun src/bot.ts",
-    "build": "bunx prisma generate && bunx prisma db push && env | grep -i database",
+    "start": "bunx prisma db push && bun src/bot.ts",
+    "build": "bunx prisma generate",
     "typecheck": "bun tsc --noEmit",
     "lint": "bunx oxlint --type-aware --type-check ./src",
     "test": "bun test",

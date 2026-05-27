@@ -107,40 +107,23 @@ async function handleMessage(message: DiscordMessage): Promise<void> {
     flags: message.flags,
   });
 
-  // Handle forwarded messages - extract original ID and use its embeds
+  // Handle forwarded messages - extract forwarded content and recursively process
   if (message.flags.has(MESSAGE_FLAG_FORWARDED)) {
     const rawMessage = message as unknown as Record<string, unknown>;
     const snapshots = rawMessage.messageSnapshots as { first: () => unknown } | undefined;
     
-    const original = snapshots?.first() as DiscordMessage | undefined;
+    const forwarded = snapshots?.first() as DiscordMessage | undefined;
     
-    if (original) {
-      logger.info("Got forwarded original", {
-        originalId: original.id,
-        originalEmbeds: original.embeds.length,
+    if (forwarded) {
+      logger.debug("Got forwarded content", {
+        forwardedId: forwarded.id,
+        embeds: forwarded.embeds.length,
+        attachments: forwarded.attachments.size,
       });
-      // Extract embeds from original message
-      const embedUrls = extractEmbedUrls(original.embeds);
-      for (const detected of embedUrls) {
-        const resolved = await resolveUrl(detected.url);
-        const result = await checkDuplicate(resolved);
-        if (result.isDuplicate && result.originalMessage) {
-          await handleDuplicateUrl(message, resolved, result.originalMessage.messageUrl);
-        }
-      }
-      // Extract images from original
-      const embedImages = extractEmbedImages(original.embeds);
-      for (const url of embedImages) {
-        const detected = await processImage(url);
-        if (detected?.hash) {
-          const result = await checkImageDuplicate(detected.hash, message.guildId);
-          if (result.isDuplicate && result.originalMessage) {
-            await handleDuplicateImage(message, url, result.originalMessage.messageUrl, result.similarity ?? 0);
-          }
-        }
-      }
+      // Process forwarded content but reply to the forwarding message
+      await processMessage(forwarded, message);
     } else {
-      logger.info("No original in snapshots");
+      logger.debug("Forwarded with no content snapshot");
     }
     return;
   }
@@ -149,10 +132,17 @@ async function handleMessage(message: DiscordMessage): Promise<void> {
   await processMessage(message);
 }
 
-async function processMessage(message: DiscordMessage): Promise<void> {
+/**
+ * Process a message for URLs and images.
+ * @param content - The message to extract content from
+ * @param respondTo - Optional message to reply to (defaults to content itself)
+ */
+async function processMessage(content: DiscordMessage, respondTo?: DiscordMessage): Promise<void> {
+  const replyTo = respondTo ?? content;
+
   // Ignore messages without embeds or attachments
-  const hasEmbeds = message.embeds && message.embeds.length > 0;
-  const hasAttachments = message.attachments && message.attachments.size > 0;
+  const hasEmbeds = content.embeds && content.embeds.length > 0;
+  const hasAttachments = content.attachments && content.attachments.size > 0;
 
   if (!hasEmbeds && !hasAttachments) {
     return;
@@ -160,7 +150,7 @@ async function processMessage(message: DiscordMessage): Promise<void> {
 
   // Extract and process URLs from embeds
   if (hasEmbeds) {
-    const embedUrls = extractEmbedUrls(message.embeds);
+    const embedUrls = extractEmbedUrls(content.embeds);
 
     if (embedUrls.length === 0) {
       logger.debug("Has embeds but no URLs extracted");
@@ -179,17 +169,17 @@ async function processMessage(message: DiscordMessage): Promise<void> {
       const result = await checkDuplicate(resolved);
 
       if (result.isDuplicate && result.originalMessage) {
-        await handleDuplicateUrl(message, resolved, result.originalMessage.messageUrl);
-      } else if (message.author) {
-        // First time seeing this URL - store it
+        await handleDuplicateUrl(replyTo, resolved, result.originalMessage.messageUrl);
+      } else {
+        // First time seeing this URL - store it (use forwarding message ID if applicable)
         await saveMessage({
-          id: message.id,
-          channelId: message.channelId,
-          guildId: message.guildId ?? null,
-          authorId: message.author.id,
+          id: replyTo.id,
+          channelId: replyTo.channelId,
+          guildId: replyTo.guildId ?? null,
+          authorId: replyTo.author?.id ?? null,
           url: resolved,
-          timestamp: message.createdAt,
-          messageUrl: getMessageUrl(message),
+          timestamp: replyTo.createdAt,
+          messageUrl: getMessageUrl(replyTo),
         });
       }
     }
@@ -198,7 +188,7 @@ async function processMessage(message: DiscordMessage): Promise<void> {
   // Extract and process images from embeds and attachments
   if (hasEmbeds || hasAttachments) {
     // Debug log all embeds
-    for (const embed of message.embeds ?? []) {
+    for (const embed of content.embeds ?? []) {
       logger.debug("Embed", {
         type: (embed as unknown as { type?: string }).type,
         url: embed.url,
@@ -209,7 +199,7 @@ async function processMessage(message: DiscordMessage): Promise<void> {
     }
 
     // Debug log all attachments
-    for (const attachment of message.attachments.values()) {
+    for (const attachment of content.attachments.values()) {
       logger.debug("Attachment", {
         name: attachment.name,
         contentType: attachment.contentType,
@@ -220,7 +210,7 @@ async function processMessage(message: DiscordMessage): Promise<void> {
     const imageUrls: { url: string; source: string }[] = [];
 
     if (hasEmbeds) {
-      const embedImages = extractEmbedImages(message.embeds);
+      const embedImages = extractEmbedImages(content.embeds);
       logger.debug("Extracted embed images", { count: embedImages.length, urls: embedImages });
       for (const url of embedImages) {
         imageUrls.push({ url, source: "embed" });
@@ -228,7 +218,7 @@ async function processMessage(message: DiscordMessage): Promise<void> {
     }
 
     if (hasAttachments) {
-      const attachmentImages = extractAttachmentImages(message.attachments);
+      const attachmentImages = extractAttachmentImages(content.attachments);
       logger.debug("Extracted attachment images", { count: attachmentImages.length, urls: attachmentImages });
       for (const url of attachmentImages) {
         imageUrls.push({ url, source: "attachment" });
@@ -254,26 +244,26 @@ async function processMessage(message: DiscordMessage): Promise<void> {
       logger.debug("Image hash computed", { source, hash: detected.hash });
 
       // Check for duplicates
-      const result = await checkImageDuplicate(detected.hash, message.guildId);
+      const result = await checkImageDuplicate(detected.hash, content.guildId);
 
       if (result.isDuplicate && result.originalMessage) {
         await handleDuplicateImage(
-          message,
+          replyTo,
           imageUrl,
           result.originalMessage.messageUrl,
           result.similarity ?? 0
         );
-      } else if (message.author) {
-        // First time seeing this image - store it
+      } else {
+        // First time seeing this image - store it (use forwarded message ID if applicable)
         await saveMessage({
-          id: message.id,
-          channelId: message.channelId,
-          guildId: message.guildId ?? null,
-          authorId: message.author.id,
+          id: replyTo.id,
+          channelId: replyTo.channelId,
+          guildId: replyTo.guildId ?? null,
+          authorId: replyTo.author?.id ?? null,
           imageUrl: detected.url,
           imageHash: detected.hash,
-          timestamp: message.createdAt,
-          messageUrl: getMessageUrl(message),
+          timestamp: replyTo.createdAt,
+          messageUrl: getMessageUrl(replyTo),
         });
       }
     }

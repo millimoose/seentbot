@@ -12,21 +12,25 @@ import { saveMessage, initDatabase, closeDatabase } from "./services/storage.js"
 import { configureSync, getConsoleSink, getLogger, getJsonLinesFormatter } from "@logtape/logtape";
 import { getPrettyFormatter } from "@logtape/pretty";
 
+// Logging configuration
+// Defaults based on NODE_ENV, can be overridden with LOG_LEVEL and LOG_FORMAT
 const isProduction = process.env.NODE_ENV === "production";
+const logLevel = (process.env.LOG_LEVEL ?? (isProduction ? "info" : "debug")) as "debug" | "info" | "warning" | "error" | "fatal" | "trace";
+const logFormat = process.env.LOG_FORMAT ?? (isProduction ? "json" : "pretty");
+
+const formatter = logFormat === "json" ? getJsonLinesFormatter() : getPrettyFormatter({ properties: true });
 
 configureSync({
   sinks: {
-    console: getConsoleSink({
-      formatter: isProduction ? getJsonLinesFormatter() : getPrettyFormatter({ properties: true }),
-    }),
+    console: getConsoleSink({ formatter }),
   },
   filters: {
-    minLevel: isProduction ? "info" : "debug",
+    minLevel: logLevel,
   },
   loggers: [
     {
       category: ["seentbot"],
-      lowestLevel: isProduction ? "info" : "debug",
+      lowestLevel: logLevel,
       sinks: ["console"],
     },
   ],

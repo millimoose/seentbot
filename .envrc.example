@@ -12,3 +12,7 @@ DATABASE_URL=file:./dev.db  # SQLite for local dev
 # GUILD_ID=*              # Respond to all guilds
 # GUILD_ID=123456789      # Respond to specific guild only
 # (empty or unset)        # Ignore all messages (safety default)
+
+# Logging (optional)
+# LOG_LEVEL=debug|info|warn|error  # Defaults based on NODE_ENV
+# LOG_FORMAT=pretty|json           # Defaults: pretty for dev, json for prod

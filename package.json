@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "bun --watch src/bot.ts",
     "start": "bun src/bot.ts",
-    "build": "bunx prisma generate && bunx prisma db push --accept-data-loss",
+    "build": "bunx prisma generate && bunx prisma db push",
     "typecheck": "bun tsc --noEmit",
     "lint": "bunx oxlint --type-aware --type-check ./src",
     "test": "bun test",

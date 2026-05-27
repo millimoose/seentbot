@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "bun --watch src/bot.ts",
     "start": "bun src/bot.ts",
-    "build": "bunx prisma generate && bunx prisma db push",
+    "build": "bunx prisma generate && bunx prisma db push && env | grep -i database",
     "typecheck": "bun tsc --noEmit",
     "lint": "bunx oxlint --type-aware --type-check ./src",
     "test": "bun test",
